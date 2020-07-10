@@ -40,7 +40,7 @@ pub enum TypeReference {
 }
 
 fn resolve_builtin_type(id: &weedle::common::Identifier<'_>) -> Option<TypeReference> {
-    match id.0.as_ref() {
+    match id.0 {
         "string" => Some(TypeReference::String),
         "u8" => Some(TypeReference::U8),
         "s8" => Some(TypeReference::S8),
@@ -225,7 +225,7 @@ impl TypeResolver for weedle::term::Boolean {
 
 impl TypeResolver for weedle::types::FloatType {
     fn resolve_type_definition(&self, _ci: &ComponentInterface) -> Result<TypeReference> {
-        if let Some(_) = self.unrestricted {
+        if self.unrestricted.is_some() {
             bail!("we don't support `unrestricted float`");
         }
         Ok(TypeReference::Float)
@@ -234,7 +234,7 @@ impl TypeResolver for weedle::types::FloatType {
 
 impl TypeResolver for weedle::types::DoubleType {
     fn resolve_type_definition(&self, _ci: &ComponentInterface) -> Result<TypeReference> {
-        if let Some(_) = self.unrestricted {
+        if self.unrestricted.is_some() {
             bail!("we don't support `unrestricted double`");
         }
         Ok(TypeReference::Double)

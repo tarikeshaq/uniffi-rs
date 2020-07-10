@@ -27,7 +27,7 @@
 //! in a `.idl` file, where it can be processed by the tools from this crate.
 //! For example you might define an interface like this:
 //!
-//! ```
+//! ```text
 //! namespace example {
 //!   u32 foo(u32 bar);
 //! }
@@ -44,7 +44,7 @@
 //! as a standard-looking Rust crate, using functions and structs and so-on. For example
 //! an implementation of the above Component Interface might look like this:
 //!
-//! ```
+//! ```text
 //! fn foo(bar: u32): u32 {
 //!     // TODO: a better example!
 //!     bar + 42
@@ -63,14 +63,14 @@
 //! to process your `.idl` file. This will generate some rust code to be included in the top-level source
 //! code of your crate. If your IDL file is named `example.idl`, then your build script would call:
 //!
-//! ```
+//! ```text
 //! uniffi::generate_component_scaffolding("./src/arithmetic.idl")
 //! ```
 //!
 //! This would output a rust file named `example.uniffi.rs`, ready to be
 //! included into the code of your rust crate like this:
 //!
-//! ```
+//! ```text
 //! include!(concat!(env!("OUT_DIR"), "/example.uniffi.rs"));
 //! ```
 //!
@@ -82,7 +82,7 @@
 //! string "uniffi_". For this example component, the necessary config in `Cargo.toml` would
 //! be:
 //!
-//! ```
+//! ```text
 //! [lib]
 //! crate-type = ["cdylib"]
 //! name = "uniffi_example"
@@ -103,7 +103,7 @@
 //! To help ensure this is done with appropriate config for your component, add a `src/main.rs`
 //! script to call `uniffi::run_bindgen_for_component`, like this:
 //!
-//! ```
+//! ```text
 //! fn main() {
 //!    uniffi::run_bindgen_for_component("example").unwrap();
 //!}
@@ -112,7 +112,7 @@
 //! Then you can generate bindings using `cargo run generate` in your crate. For example, to
 //! generate python bindings for the example component, run:
 //!
-//! ```
+//! ```text
 //! cargo run generate -l python
 //! ```
 //!
@@ -120,6 +120,7 @@
 //! to load and use the compiled rust code via its C-compatible FFI.
 //!
 
+use std::convert::TryInto;
 use std::io::prelude::*;
 use std::{
     env,
@@ -205,7 +206,7 @@ pub fn run_bindgen_helper(component_name: Option<&str>) -> Result<()> {
                 .arg(
                     clap::Arg::with_name("lib_file")
                         .takes_value(true)
-                        .required(if let Some(_) = default_lib_file {
+                        .required(if default_lib_file.is_some() {
                             false
                         } else {
                             true
@@ -239,13 +240,16 @@ pub fn run_bindgen_helper(component_name: Option<&str>) -> Result<()> {
     let matches = app.get_matches();
     match matches.subcommand() {
         ("generate", Some(m)) => run_bindings_generate_subcommand(default_lib_file, m)?,
-        ("exec", Some(m)) => run_bindings_exec_subcommand(component_name.is_some(), m)?,
+        ("exec", Some(m)) => run_bindings_exec_subcommand(default_lib_file, m)?,
         _ => println!("No command specified; try `--help` for some help."),
     }
     Ok(())
 }
 
-fn run_bindings_generate_subcommand(default_lib_file: Option<std::ffi::OsString>, command_args: &clap::ArgMatches) -> Result<()> {
+fn run_bindings_generate_subcommand(
+    default_lib_file: Option<std::ffi::OsString>,
+    command_args: &clap::ArgMatches,
+) -> Result<()> {
     let lib_file = match command_args.value_of_os("lib_file") {
         Some(lib_file) => lib_file.to_os_string(),
         None => match default_lib_file {
@@ -258,110 +262,64 @@ fn run_bindings_generate_subcommand(default_lib_file: Option<std::ffi::OsString>
         None => PathBuf::from(&lib_file)
             .parent()
             .ok_or_else(|| anyhow!("Library file has no parent directory"))?
-            .as_os_str().to_os_string(),
+            .as_os_str()
+            .to_os_string(),
     };
     println!("Extracting Interface Definition from {:?}", lib_file);
-    let ci = get_component_interface_from_library(&lib_file)?;
+    let ci = bindings::get_component_interface_from_cdylib(&lib_file)?;
     let languages: Vec<&str> = match command_args.values_of("language") {
-        None => POSSIBLE_LANGUAGES.iter().cloned().collect(),
+        None => POSSIBLE_LANGUAGES.to_vec(),
         Some(ls) => ls.collect(),
     };
     for lang in languages {
-        match lang {
-            "kotlin" => {
-                println!(
-                    "Generating Kotlin bindings into {}",
-                    out_dir.to_str().unwrap_or("[UNPRINTABLE]")
-                );
-                bindings::kotlin::compile_kotlin_bindings(&ci, &out_dir)?;
-            }
-            "python" => {
-                println!(
-                    "Generating Python bindings {}",
-                    out_dir.to_str().unwrap_or("[UNPRINTABLE]")
-                );
-                bindings::python::write_python_bindings(&ci, &out_dir)?;
-            }
-            "swift" => {
-                println!("Generating Swift bindings...");
-                bindings::swift::write_swift_bindings(&ci, &out_dir)?;
-
-                println!("Compiling generated Swift bindings into module...");
-                bindings::swift::compile_swift_module(&ci, &out_dir)?;
-            }
-            _ => bail!(
-                "Somehow tried to generate bindings for unsupported language {}",
-                lang
-            ),
-        }
+        println!(
+            "Generating {} bindings into {}",
+            lang,
+            out_dir.to_str().unwrap_or("[UNPRINTABLE]")
+        );
+        bindings::write_bindings(&ci, &out_dir, lang.try_into()?)?;
     }
     println!("Done!");
     Ok(())
 }
 
 fn run_bindings_exec_subcommand(
-    use_target_dir: bool,
+    default_lib_file: Option<std::ffi::OsString>,
     command_args: &clap::ArgMatches,
 ) -> Result<()> {
-    let curdir = current_target_dir()?;
-    let target_dir = if use_target_dir {
-        Some(curdir.as_os_str())
-    } else {
-        None
-    };
     let script_file = command_args.value_of("script");
-    let lang = match command_args.value_of("language") {
-        Some(lang) => lang,
+    let lang: bindings::TargetLanguage = match command_args.value_of("language") {
+        Some(lang) => lang.try_into()?,
         None => {
             // Try to guess language based on script file extension.
-            if let None = script_file {
+            if script_file.is_none() {
                 bail!("No script file and no language specified, so I don't know what language shell to start")
             }
             let script_file_buf = PathBuf::from(script_file.unwrap());
             match script_file_buf.extension().unwrap_or_default().to_str() {
-                Some("kts") => "kotlin",
-                Some("py") => "python",
-                Some("swift") => "swift",
+                Some(ext) => ext.try_into()?,
                 _ => bail!("Cannot guess language of script file, please specify it explicitly"),
             }
         }
     };
-    match lang {
-        "kotlin" => {
-            bindings::kotlin::run_kotlin_script(target_dir, script_file)?;
+    // If we have a default cdylib, make sure that it has the relevant bindings available
+    // and run from within its parent directory.
+    let target_dir = match default_lib_file {
+        None => None,
+        Some(lib_file) => {
+            let lib_file = PathBuf::from(lib_file);
+            match lib_file.parent() {
+                None => None,
+                Some(target_dir) => {
+                    let ci = bindings::get_component_interface_from_cdylib(&lib_file)?;
+                    bindings::write_bindings(&ci, target_dir, lang)?;
+                    bindings::compile_bindings(&ci, target_dir, lang)?;
+                    Some(target_dir.to_path_buf())
+                }
+            }
         }
-        "python" => {
-            bindings::python::run_python_script(target_dir, script_file)?;
-        }
-        "swift" => {
-            bindings::swift::run_swift_script(target_dir, script_file)?;
-        }
-        _ => bail!(
-            "Somehow tried to launch interpreter for unsupported language {}",
-            lang
-        ),
-    }
-    Ok(())
-}
-
-// Given the path to a compiled `uniffi` library file, extract and deserialize the
-// `ComponentInterface that was stored therein. This returns an error if the file does
-// not contain a `ComponentInterface` definition or if it was generated with an incompatible
-// version of `uniffi`.
-fn get_component_interface_from_library(lib_file: &std::ffi::OsStr) -> Result<interface::ComponentInterface> {
-    use object::read::{Object, ObjectSection};
-    let lib_bytes = std::fs::read(lib_file)?;
-    let lib = object::read::File::parse(lib_bytes.as_slice())?;
-    let idl_section = lib.section_by_name(".uniffi_idl");
-    Ok(match idl_section {
-        None => bail!("Not a uniffi library: no `.uniffi_idl` section found"),
-        Some(idl_section) => match idl_section.uncompressed_data() {
-            Err(_) => bail!(
-                "Not a uniffi library: missing or corrupt `.uniffi_idl` section"
-            ),
-            Ok(defn) => interface::ComponentInterface::from_bincode(&defn)?,
-        },
-    })
+    };
+    bindings::run_script(target_dir, script_file, lang)
 }
 
 // Resolve the location of the default library file, relative to the running executable.

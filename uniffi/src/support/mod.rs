@@ -6,6 +6,8 @@ use anyhow::{bail, Result};
 pub use bytes::buf::{Buf, BufMut};
 use ffi_support::ByteBuffer;
 
+pub mod tests;
+
 /// Any type that can be returned over the FFI must implement the `Lowerable` trait, to define how
 /// it gets lowered into bytes for transit. We provide default implementtions for primitive types,
 /// and a typical implementation for composite types would lower each member in turn.

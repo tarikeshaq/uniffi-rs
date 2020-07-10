@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use askama::Template;
-use heck::{ SnakeCase, CamelCase, ShoutySnakeCase };
+use heck::{CamelCase, ShoutySnakeCase, SnakeCase};
 
 use crate::interface::*;
 

@@ -3,13 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     fs::File,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Result;
 
@@ -18,9 +17,16 @@ pub use gen_kotlin::{Config, KotlinWrapper};
 
 use super::super::interface::ComponentInterface;
 
-// Generate kotlin bindings for the given ComponentInterface, as a string.
+pub fn write_bindings(ci: &ComponentInterface, out_dir: &Path) -> Result<()> {
+    let mut kt_file = PathBuf::from(out_dir);
+    kt_file.push(format!("{}.kt", ci.namespace()));
+    let mut f = File::create(&kt_file)?;
+    write!(f, "{}", generate_bindings(&ci)?)?;
+    Ok(())
+}
 
-pub fn generate_kotlin_bindings(ci: &ComponentInterface) -> Result<String> {
+// Generate kotlin bindings for the given ComponentInterface, as a string.
+pub fn generate_bindings(ci: &ComponentInterface) -> Result<String> {
     let config = Config::from(&ci);
     use askama::Template;
     KotlinWrapper::new(config, &ci)
@@ -28,26 +34,12 @@ pub fn generate_kotlin_bindings(ci: &ComponentInterface) -> Result<String> {
         .map_err(|_| anyhow::anyhow!("failed to render kotlin bindings"))
 }
 
-pub fn write_kotlin_bindings(ci: &ComponentInterface, out_dir: &OsStr) -> Result<()> {
-    let mut kt_file = PathBuf::from(out_dir);
-    kt_file.push(format!("{}.kt", ci.namespace()));
-    let mut f =
-        File::create(&kt_file).map_err(|e| anyhow!("Failed to create .kt file: {:?}", e))?;
-    write!(f, "{}", generate_kotlin_bindings(&ci)?)
-        .map_err(|e| anyhow!("Failed to write kotlin bindings: {:?}", e))?;
-    Ok(())
-}
-
 // Generate kotlin bindings for the given ComponentInterface, then use the kotlin
 // command-line tools to compile them into a .jar file.
 
-pub fn compile_kotlin_bindings(ci: &ComponentInterface, out_dir: &OsStr) -> Result<()> {
+pub fn compile_bindings(ci: &ComponentInterface, out_dir: &Path) -> Result<()> {
     let mut kt_file = PathBuf::from(out_dir);
     kt_file.push(format!("{}.kt", ci.namespace()));
-    let mut f =
-        File::create(&kt_file).map_err(|e| anyhow!("Failed to create .kt file: {:?}", e))?;
-    write!(f, "{}", generate_kotlin_bindings(&ci)?)
-        .map_err(|e| anyhow!("Failed to write kotlin bindings: {:?}", e))?;
     let mut jar_file = PathBuf::from(out_dir);
     jar_file.push(format!("{}.jar", ci.namespace()));
     let status = std::process::Command::new("kotlinc")
@@ -56,10 +48,8 @@ pub fn compile_kotlin_bindings(ci: &ComponentInterface, out_dir: &OsStr) -> Resu
         .arg(&kt_file)
         .arg("-d")
         .arg(jar_file)
-        .spawn()
-        .map_err(|_| anyhow::anyhow!("failed to spawn `kotlinc`"))?
-        .wait()
-        .map_err(|_| anyhow::anyhow!("failed to wait for `kotlinc` subprocess"))?;
+        .spawn()?
+        .wait()?;
     if !status.success() {
         bail!("running `kotlinc` failed")
     }
@@ -69,40 +59,32 @@ pub fn compile_kotlin_bindings(ci: &ComponentInterface, out_dir: &OsStr) -> Resu
 // Execute the specifed kotlin script, with classpath based on the generated
 // artifacts in the given output directory.
 
-pub fn run_kotlin_script(out_dir: Option<&OsStr>, script_file: Option<&str>) -> Result<()> {
+pub fn run_script(out_dir: Option<&Path>, script_file: Option<&Path>) -> Result<()> {
     let mut classpath = std::env::var_os("CLASSPATH").unwrap_or_else(|| OsString::from(""));
     // This lets java find the compiled library for the rust component.
     if let Some(out_dir) = out_dir {
         classpath.push(":");
         classpath.push(out_dir);
         // This lets java use any generate .jar files containing bindings for the rust component.
-        for entry in PathBuf::from(out_dir)
-            .read_dir()
-            .map_err(|_| anyhow!("failed to read directory {:?}", out_dir))?
-        {
-            if let Ok(entry) = entry {
-                if let Some(ext) = entry.path().extension() {
-                    if ext == "jar" {
-                        classpath.push(":");
-                        classpath.push(entry.path().to_str().unwrap());
-                    }
+        for entry in PathBuf::from(out_dir).read_dir()? {
+            let entry = entry?;
+            if let Some(ext) = entry.path().extension() {
+                if ext == "jar" {
+                    classpath.push(":");
+                    classpath.push(entry.path().to_str().unwrap());
                 }
-            } else {
-                bail!("error while reading directory")
             }
         }
     }
     let mut cmd = std::process::Command::new("kotlinc");
+    // Make sure it can load the .jar and its dependencies.
     cmd.arg("-classpath").arg(classpath);
+    // Enable runtime assertions, for easy testing etc.
+    cmd.arg("-J-ea");
     if let Some(script) = script_file {
         cmd.arg("-script").arg(script);
     }
-    let status = cmd
-        .spawn()
-        .map_err(|_| anyhow::anyhow!("failed to spawn `kotlinc`"))?
-        .wait()
-        .map_err(|_| anyhow::anyhow!("failed to wait for `kotlinc` subprocess"))?;
-    if !status.success() {
+    if !cmd.spawn()?.wait()?.success() {
         bail!("running `kotlinc` failed")
     }
     Ok(())

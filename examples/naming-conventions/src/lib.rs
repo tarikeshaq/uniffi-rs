@@ -2,6 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// This file is deliberately testing non-standard naming conventions,
+// so there's no need to warn about it.
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+#![allow(clippy::enum_variant_names)]
+
 #[derive(Debug, Clone)]
 struct snake_case_object {
     id: u32,

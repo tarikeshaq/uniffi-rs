@@ -91,7 +91,7 @@ impl<'ci> ComponentInterface {
         types::TypeFinder::find_type_definitions(&defns, &mut ci)?;
         // With those names resolved, we can build a complete representation of the API.
         APIBuilder::process(&defns, &mut ci)?;
-        if ci.namespace.len() == 0 {
+        if ci.namespace.is_empty() {
             bail!("missing namespace definition");
         }
         // Now that the high-level API is settled, we can derive the low-level FFI.
@@ -121,19 +121,19 @@ impl<'ci> ComponentInterface {
     }
 
     pub fn iter_enum_definitions(&self) -> Vec<Enum> {
-        self.enums.iter().cloned().collect()
+        self.enums.to_vec()
     }
 
     pub fn iter_record_definitions(&self) -> Vec<Record> {
-        self.records.iter().cloned().collect()
+        self.records.to_vec()
     }
 
     pub fn iter_function_definitions(&self) -> Vec<Function> {
-        self.functions.iter().cloned().collect()
+        self.functions.to_vec()
     }
 
     pub fn iter_object_definitions(&self) -> Vec<Object> {
-        self.objects.iter().cloned().collect()
+        self.objects.to_vec()
     }
 
     pub fn ffi_bytebuffer_alloc(&self) -> FFIFunction {
@@ -200,7 +200,7 @@ impl<'ci> ComponentInterface {
     }
 
     fn add_namespace_definition(&mut self, defn: Namespace) -> Result<()> {
-        if self.namespace.len() != 0 {
+        if !self.namespace.is_empty() {
             bail!("duplicate namespace definition");
         }
         self.namespace.push_str(&defn.name);
@@ -408,7 +408,6 @@ impl APIConverter<Function> for weedle::namespace::OperationNamespaceMember<'_> 
         if self.attributes.is_some() {
             bail!("no interface member attributes supported yet");
         }
-        if let None = self.identifier {}
         Ok(Function {
             name: match self.identifier {
                 None => bail!("anonymous functions are not supported {:?}", self),
